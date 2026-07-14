@@ -1,0 +1,42 @@
+name: Publish CapRover no-post-update-prune image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - test/no-post-update-prune
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable test image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./dockerfile-captain.release
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/fmercurio/caprover:1.14.2-no-post-update-prune-9fd520c
+          provenance: false
+
+      - name: Record digest
+        run: echo "digest=${{ steps.build.outputs.digest }}"
