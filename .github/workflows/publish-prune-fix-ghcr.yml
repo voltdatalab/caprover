@@ -32,10 +32,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./dockerfile-captain.release
+          file: ./dockerfile-captain.prune-fix
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/fmercurio/caprover:1.14.2-no-post-update-prune-9fd520c
+          tags: ghcr.io/fmercurio/caprover:1.14.2-no-post-update-prune-9fd520c-v2
           provenance: false
 
       - name: Record digest

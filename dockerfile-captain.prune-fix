@@ -1,0 +1,11 @@
+FROM node:18-alpine AS backend-builder
+RUN apk add --update --no-cache make gcc g++ git curl openssl openssh
+WORKDIR /src
+COPY . ./
+RUN npm ci && npm run build
+
+# Preserve the exact official 1.14.2 runtime, entrypoint, dependencies, and
+# prebuilt dashboard assets. Replace only the compiled backend containing the
+# post-update-prune fix.
+FROM caprover/caprover@sha256:252a70d617deedb01979ea59eb522531d159a22c2abd1be1125a16301dc931b6
+COPY --from=backend-builder /src/built /usr/src/app/built
