@@ -1606,12 +1606,9 @@ class DockerApi {
                     .update(updatedData)
             })
             .then(function (serviceData) {
-                // give some time such that the new container is updated.
-                // also we don't want to fail the update just because prune failed.
-                setTimeout(function () {
-                    self.pruneContainers()
-                }, 5000)
-
+                // Diagnostic variant B: do not run a global container prune in
+                // the Swarm service-update lifecycle. Cleanup must be scheduled
+                // separately after the update has converged.
                 return serviceData
             })
     }
