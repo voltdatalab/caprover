@@ -35,7 +35,7 @@ jobs:
           file: ./dockerfile-captain.prune-fix
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/voltdatalab/caprover:1.14.2-no-post-update-prune-9fd520c-v2
+          tags: ghcr.io/voltdatalab/caprover:1.14.2-no-post-update-prune-api-v144-v3
           provenance: false
 
       - name: Record digest
