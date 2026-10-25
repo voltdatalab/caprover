@@ -1,0 +1,130 @@
+name: Nuclito Captain 1.15.5 - no global prune (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nuclito-captain-1.15.5-no-prune
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      BASE_SOURCE: 5a5c89c67ea819faf2032a77649eaf84c106f7da
+      BASE_IMAGE: caprover/caprover@sha256:585a559a6d6251350f38175b53a00aa0a54a14984dffb6bf74df962da5c029e3
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Exact dispatch admission (before checkout or registry access)
+        env:
+          EVENT: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$EVENT" = workflow_dispatch
+          test "$REPOSITORY" = voltdatalab/caprover
+          test "$REF" = refs/heads/fix/nuclito-captain-1.15.5-no-global-prune
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          export PROOF="$RUNNER_TEMP/captain-no-prune-proof"
+          export BASELINE="$RUNNER_TEMP/captain-1.15.5-baseline"
+          export NPM_CONFIG_CACHE="$RUNNER_TEMP/npm-cache"
+          printf '%s\n' "PROOF=$PROOF" "BASELINE=$BASELINE" "NPM_CONFIG_CACHE=$NPM_CONFIG_CACHE" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/voltdatalab/caprover:1.15.5-no-global-prune-${SOURCE_SHA}" >> "$GITHUB_ENV"
+          mkdir -p "$PROOF" "$BASELINE"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, public tag verified
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, public tag verified
+        with:
+          node-version: '22.23.2'
+
+      - name: Exact source, locked dependencies, scoped lint, guarded Jest, canonical build
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$BASE_SOURCE" HEAD
+          node --version | tee "$PROOF/node-version.txt"
+          npm --version | tee "$PROOF/npm-version.txt"
+          npm ci --ignore-scripts 2>&1 | tee "$PROOF/npm-ci.log"
+          git diff --exit-code -- package.json package-lock.json
+          node tests/no-global-prune/source-contract.cjs > "$PROOF/source-contract.json"
+          node node_modules/eslint/bin/eslint.js src/docker/DockerApi.ts 2>&1 | tee "$PROOF/lint.log"
+          node node_modules/jest/bin/jest.js --config tests/no-global-prune/jest.config.cjs --runInBand --json --outputFile "$PROOF/jest.json" 2>&1 | tee "$PROOF/jest.log"
+          python3 tests/no-global-prune/artifact-contract-test.py 2>&1 | tee "$PROOF/artifact-contract-tests.log"
+          npm run build 2>&1 | tee "$PROOF/build.log"
+          git archive "$BASE_SOURCE" | tar -x -C "$BASELINE"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$BASELINE/node_modules"
+          (cd "$BASELINE" && npm run build) 2>&1 | tee "$PROOF/baseline-build.log"
+          python3 tests/no-global-prune/compiled-contract.py "$BASELINE/built" built > "$PROOF/compiled-contract.json"
+          git diff --check
+          git status --porcelain > "$PROOF/git-status.txt"
+          test ! -s "$PROOF/git-status.txt"
+          git rev-parse HEAD > "$PROOF/source-sha.txt"
+          sha256sum Dockerfile.nuclito-no-global-prune src/docker/DockerApi.ts built/docker/DockerApi.js built/docker/DockerApi.js.map > "$PROOF/artifact-sha256.txt"
+
+      - name: Build linux/amd64 overlay and prove inherited UI/runtime and exact backend-only delta
+        run: |
+          set -euo pipefail
+          docker pull --platform linux/amd64 "$BASE_IMAGE"
+          CONTEXT=$(mktemp -d "$RUNNER_TEMP/captain-build-context.XXXXXX")
+          mkdir -p "$CONTEXT/built/docker"
+          cp -p -- Dockerfile.nuclito-no-global-prune "$CONTEXT/"
+          cp -p -- built/docker/DockerApi.js built/docker/DockerApi.js.map "$CONTEXT/built/docker/"
+          diff -u <(printf '%s\n' Dockerfile.nuclito-no-global-prune built/docker/DockerApi.js built/docker/DockerApi.js.map) <(cd "$CONTEXT" && find . -type f -printf '%P\n' | LC_ALL=C sort)
+          for file in Dockerfile.nuclito-no-global-prune built/docker/DockerApi.js built/docker/DockerApi.js.map; do
+            test -f "$CONTEXT/$file" && test ! -L "$CONTEXT/$file"
+            cmp -- "$file" "$CONTEXT/$file"
+            test "$(stat -c '%a' "$file")" = "$(stat -c '%a' "$CONTEXT/$file")"
+          done
+          (cd "$CONTEXT" && sha256sum Dockerfile.nuclito-no-global-prune built/docker/DockerApi.js built/docker/DockerApi.js.map) > "$PROOF/build-context-sha256.txt"
+          docker build --platform linux/amd64 --network none -f "$CONTEXT/Dockerfile.nuclito-no-global-prune" -t "$IMAGE" "$CONTEXT"
+          docker image inspect "$BASE_IMAGE" > "$PROOF/base-image.json"
+          docker image inspect "$IMAGE" > "$PROOF/candidate-image.json"
+          base_container=$(docker create --network none "$BASE_IMAGE")
+          candidate_container=$(docker create --network none "$IMAGE")
+          trap 'docker rm -v "$base_container" "$candidate_container" >/dev/null' EXIT
+          docker export "$base_container" -o "$RUNNER_TEMP/captain-base.tar"
+          docker export "$candidate_container" -o "$RUNNER_TEMP/captain-candidate.tar"
+          python3 tests/no-global-prune/image-contract.py \
+            "$RUNNER_TEMP/captain-base.tar" "$RUNNER_TEMP/captain-candidate.tar" \
+            "$PROOF/base-image.json" "$PROOF/candidate-image.json" \
+            "$BASELINE/built" built "$PROOF/image-contract.json" | tee "$PROOF/image-contract.log"
+          sha256sum "$RUNNER_TEMP/captain-base.tar" "$RUNNER_TEMP/captain-candidate.tar" > "$PROOF/export-sha256.txt"
+
+      - name: Publish fresh commit tag only after all gates
+        env:
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$RUNNER_TEMP/captain-docker-config"
+          mkdir -m 700 "$DOCKER_CONFIG"
+          trap 'docker logout ghcr.io >/dev/null 2>&1; rm -rf "$DOCKER_CONFIG"' EXIT
+          python3 tests/no-global-prune/ghcr-tag-absent.py | tee "$PROOF/tag-absence.log"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+          docker push "$IMAGE" 2>&1 | tee "$PROOF/push.log"
+          docker manifest inspect "$IMAGE" > "$PROOF/published-manifest.json"
+          docker image inspect "$IMAGE" --format '{{json .RepoDigests}}' > "$PROOF/published-repodigests.json"
+          python3 -c 'import json,os,pathlib; p=pathlib.Path(os.environ["PROOF"]); manifest=json.loads((p/"published-manifest.json").read_text()); local=json.loads((p/"candidate-image.json").read_text())[0]; assert manifest["config"]["digest"] == local["Id"], "Published config digest differs from tested image"'
+
+      - name: Archive proofs (also on failure; not a deploy)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4, public tag verified
+        with:
+          name: captain-1.15.5-no-global-prune-${{ github.sha }}
+          path: ${{ env.PROOF }}
+          if-no-files-found: error
+          retention-days: 30

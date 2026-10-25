@@ -537,9 +537,6 @@ class DockerApi {
                 })
             })
             .then(function () {
-                return self.pruneContainers()
-            })
-            .then(function () {
                 Logger.d(`Disconnecting from network: ${nameOrId}`)
 
                 return self.dockerode.getNetwork(networkIdOrName).disconnect({
@@ -1652,15 +1649,6 @@ class DockerApi {
                 return self.dockerode
                     .getService(serviceName)
                     .update(updatedData)
-            })
-            .then(function (serviceData) {
-                // give some time such that the new container is updated.
-                // also we don't want to fail the update just because prune failed.
-                setTimeout(function () {
-                    self.pruneContainers()
-                }, 5000)
-
-                return serviceData
             })
     }
 
