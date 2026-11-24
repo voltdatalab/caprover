@@ -1,0 +1,4 @@
+# Precompiled, regression-tested backend overlay; no dependency/UI/runtime changes.
+# Build and verify built/ in the manual workflow before invoking docker build.
+FROM caprover/caprover@sha256:7bbe8ba293d591882dff303c79e460b641f4218a8f8a9cf6658fd4d66f9543c1
+COPY built/docker/DockerApi.js built/docker/DockerApi.js.map /usr/src/app/built/docker/
